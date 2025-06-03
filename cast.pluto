@@ -1,35 +1,30 @@
 local { json, socket, scheduler } = require "pluto:*"
-local { wsIsUpgradeRequest } = require "websocket"
+require "websocket"
 
 export function here(name)
 	local og_print = print
 	_G.CAST_TO_NOOP = true
 	local sched = new scheduler()
 	socket.bind(sched, 9657, function(s)
-		if req := s:recv() then
-			if key := wsIsUpgradeRequest(req) then
-				s:wsUpgrade(key)
-				while raw := s:wsRecv() do
-					if data := json.decode(raw) then
-						if data.target ~= name then
-							og_print("Ignoring cast for a different target: "..dumpvar(data))
-						else
-							print = function(...)
-								--og_print(...)
-								local arr = { ... }
-								arr:insert("\n")
-								s:wsSend(json.encode(arr))
-							end
-							io.write = function(...)
-								s:wsSend(json.encode(...))
-							end
-							xpcall(loadfile(data.file), function(e)
-								--og_print(debug.traceback(e,2))
-								s:wsSend(json.encode({ debug.traceback(e,2) }))
-							end)
-							s:close()
-						end
+		while raw := s:wsRecv() do
+			if data := json.decode(raw) then
+				if data.target ~= name then
+					og_print("Ignoring cast for a different target: "..dumpvar(data))
+				else
+					print = function(...)
+						--og_print(...)
+						local arr = { ... }
+						arr:insert("\n")
+						s:wsSend(json.encode(arr))
 					end
+					io.write = function(...)
+						s:wsSend(json.encode(...))
+					end
+					xpcall(loadfile(data.file), function(e)
+						--og_print(debug.traceback(e,2))
+						s:wsSend(json.encode({ debug.traceback(e,2) }))
+					end)
+					s:close()
 				end
 			end
 		end
@@ -41,7 +36,6 @@ export function to(name)
 	if not CAST_TO_NOOP then
 		local s = socket.connect("localhost", 9657)
 		assert(s)
-		assert(s:wsUpgrade("localhost"))
 		s:wsSend(json.encode({ target = name, file = arg[0] }))
 		while data := s:wsRecv() do
 			io.write(json.decode(data):unpack())
