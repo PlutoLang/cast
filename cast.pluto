@@ -1,45 +1,107 @@
 local { json, socket, scheduler } = require "pluto:*"
-require "websocket"
+local { wsIsUpgradeRequest } = require "websocket"
 
 export function here(name)
 	local og_print = print
+	local regs = {}
 	_G.CAST_TO_NOOP = true
 	local sched = new scheduler()
-	socket.bind(sched, 9657, function(s)
-		while raw := s:wsRecv() do
-			if data := json.decode(raw) then
-				if data.target ~= name then
-					og_print("Ignoring cast for a different target: "..dumpvar(data))
-				else
-					print = function(...)
-						--og_print(...)
-						local arr = { ... }
-						arr:insert("\n")
-						s:wsSend(json.encode(arr))
+	while true do
+		local port = 9657
+		while true do
+			try
+				socket.bind(sched, port, function(s)
+					if data := s:recv() then
+						if key := wsIsUpgradeRequest(data) then
+							s:wsUpgrade(key)
+						else
+							s:unrecv(data)
+						end
 					end
-					io.write = function(...)
-						s:wsSend(json.encode(...))
+
+					while raw := s:wsRecv() do
+						if data := json.decode(raw) then
+							if data.reg then
+								if data.reg == name then
+									s:send("0")
+									s:close()
+								else
+									regs[data.reg] = data.port
+									s:send("1")
+									while s:recv() do
+									end
+									regs[data.reg] = nil
+								end
+							elseif data.target ~= name then
+								s:wsSend(json.encode({ port = regs[data.target] or 0 }))
+								s:close()
+							else
+								print = function(...)
+									--og_print(...)
+									local arr = { ... }
+									arr:insert("\n")
+									s:wsSend(json.encode(arr))
+								end
+								io.write = function(...)
+									s:wsSend(json.encode(...))
+								end
+								xpcall(loadfile(data.file), function(e)
+									--og_print(debug.traceback(e,2))
+									s:wsSend(json.encode({ debug.traceback(e,2) }))
+								end)
+								s:close()
+							end
+						end
 					end
-					xpcall(loadfile(data.file), function(e)
-						--og_print(debug.traceback(e,2))
-						s:wsSend(json.encode({ debug.traceback(e,2) }))
-					end)
-					s:close()
-				end
+				end)
+				break
+			catch _ then
+				++port
 			end
 		end
-	end)
-	sched:run()
+		og_print("Listening on TCP/"..port)
+		if port == 9657 then
+			og_print("Receiving casts for for \""..name.."\".")
+		else
+			og_print("Registering with TCP/9657...")
+			sched:add(function()
+				local s = socket.connect("localhost", 9657)
+				s:wsSend(json.encode({ reg = name, port = port }))
+				assert(s:recv() == "1", "There's already a cast server for \""..name.."\" running on this machine.")
+				og_print("Receiving casts for \""..name.."\".")
+				while s:recv() do
+				end
+				og_print("Server on TCP/9657 dropped out. Restarting...")
+				sched.coros:clear()
+			end)
+		end
+		sched:run()
+	end
 end
 
 export function to(name)
 	if not CAST_TO_NOOP then
-		local s = socket.connect("localhost", 9657)
-		assert(s)
-		s:wsSend(json.encode({ target = name, file = arg[0] }))
-		while data := s:wsRecv() do
-			io.write(json.decode(data):unpack())
+		local port = 9657
+		::cast_to_different_port::
+		local s = socket.connect("localhost", port)
+		if s then
+			--assert(s:wsUpgrade("localhost"))
+			s:wsSend(json.encode({ target = name, file = arg[0] }))
+			while raw := s:wsRecv() do
+				local data = json.decode(raw)
+				if data.port then
+					if data.port ~= 0 then
+						port = data.port
+						goto cast_to_different_port
+					end
+					goto cast_to_fail
+				end
+				io.write(data:unpack())
+			end
+			os.exit(0)
 		end
-		os.exit(0)
+		::cast_to_fail::
+		print("No cast server for \""..name.."\" found.")
+		os.exit(1)
 	end
 end
