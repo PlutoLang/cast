@@ -6,6 +6,9 @@ export function here(name)
 	local regs = {}
 	_G.CAST_TO_NOOP = true
 	local sched = new scheduler()
+	if coroutine.isyieldable() then
+		scheduler.yieldfunc = || -> coroutine.sleep(1)
+	end
 	while true do
 		local port = 9657
 		while true do
