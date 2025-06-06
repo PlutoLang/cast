@@ -11,6 +11,11 @@ export function here(name)
 		while true do
 			try
 				socket.bind(sched, port, function(s)
+					if s:getpeer() ~= "127.0.0.1" and s:getpeer() ~= "::1" then
+						s:close()
+						return
+					end
+
 					if data := s:recv() then
 						if key := wsIsUpgradeRequest(data) then
 							s:wsUpgrade(key)
