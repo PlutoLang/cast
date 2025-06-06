@@ -46,12 +46,13 @@ export function here(name)
 							else
 								print = function(...)
 									--og_print(...)
-									local arr = { ... }
+									local arr = { ... }:map(tostring)
 									arr:insert("\n")
 									s:wsSend(json.encode(arr))
 								end
 								io.write = function(...)
-									s:wsSend(json.encode(...))
+									local arr = { ... }:map(tostring)
+									s:wsSend(json.encode(arr))
 								end
 								xpcall(loadfile(data.file), function(e)
 									--og_print(debug.traceback(e,2))
